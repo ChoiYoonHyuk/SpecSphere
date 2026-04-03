@@ -213,8 +213,9 @@ for epoch in range(1, 1501):
     model.eval()
     out, _, _, _, _ = model(data)
     pred = out.argmax(1)
-    acc = pred[data.test_mask].eq(data.y[data.test_mask]).sum().item() / int(data.test_mask.sum())
-    if acc > best:
-        best = acc
+
+    val_acc = pred[data.val_mask].eq(data.y[data.val_mask]).sum().item() / int(data.val_mask.sum())
+    if val_acc > best:
+        best = val_acc
         print(f'{epoch}:{best:.4f}')
 print(best)
