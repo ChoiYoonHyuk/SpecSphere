@@ -178,11 +178,14 @@ def pgd_edge_attack(data, branch_forward, p, step, k):
     data.edge_index = ei
     return ei_adv
 
-best = 0.0
+best_val = 0.0
+best_test = 0.0
+
 for epoch in range(1, 1501):
     model.train()
     out, lp_reg, hp_reg, z_spec, z_spat = model(data, need_grad_score=True)
     loss_ce = F.nll_loss(out[data.train_mask], data.y[data.train_mask])
+
     ei_adv = pgd_edge_attack(
         data,
         lambda d: F.log_softmax(model.cls(F.relu(model.spec(d.x, d.edge_index))), 1),
@@ -191,7 +194,9 @@ for epoch in range(1, 1501):
     data.edge_index = ei_adv
     out_spec_adv = model.cls(F.relu(model.spec(data.x, data.edge_index)))
     loss_adv_A = F.nll_loss(F.log_softmax(out_spec_adv, 1)[data.train_mask], data.y[data.train_mask])
+
     data.edge_index = dataset[0].edge_index.to(device)
+
     x_adv = pgd_feature_attack(
         data,
         lambda d: F.log_softmax(model.cls(F.relu(model.spat(d.x, d.edge_index))), 1),
@@ -200,22 +205,32 @@ for epoch in range(1, 1501):
     data.x = x_adv
     out_spat_adv = model.cls(F.relu(model.spat(data.x, data.edge_index)))
     loss_adv_X = F.nll_loss(F.log_softmax(out_spat_adv, 1)[data.train_mask], data.y[data.train_mask])
+
     data.x = dataset[0].x.to(device)
+
     cons_all = (z_spec - z_spat).pow(2).sum(dim=1)
     thr = cons_all.median()
     bu = (cons_all < thr).float()
     loss_cons = (bu * cons_all).mean()
     loss_comp = ((1 - bu) * F.relu(0.5 - (z_spec - z_spat).norm(dim=1)).pow(2)).mean()
+
     loss = loss_ce + LAMB_ADV * (loss_adv_A + loss_adv_X) + LAMB_CONS * (lp_reg + hp_reg + loss_cons + loss_comp)
+
     opt.zero_grad()
     loss.backward()
     opt.step()
+
+    # ===== evaluation =====
     model.eval()
     out, _, _, _, _ = model(data)
     pred = out.argmax(1)
 
     val_acc = pred[data.val_mask].eq(data.y[data.val_mask]).sum().item() / int(data.val_mask.sum())
+    test_acc = pred[data.test_mask].eq(data.y[data.test_mask]).sum().item() / int(data.test_mask.sum())
+
     if val_acc > best_val:
         best_val = val_acc
-        print(f'{epoch}:{best_val:.4f}')
-print(best_val)
+        best_test = test_acc
+        print(f'{epoch}: val={best_val:.4f}, test={best_test:.4f}')
+
+print(f'Final Best -> val: {best_val:.4f}, test: {best_test:.4f}')
